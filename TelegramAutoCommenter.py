@@ -1,87 +1,72 @@
+import os
 import sys
 import asyncio
 import random
-
 from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
 
-API_ID = 13959415
-API_HASH = '3f02e6c5a0d9c7438fc27153a8d70a92'
-SESSION_NAME = "comment_session"
+async def main():
+    print("=== Telegram Авто Комментатор ===")
 
-# Прокси (SOCKS5)
-PROXY = ('socks5', '51.158.68.133', 1080, True, 'user_test', 'pass_test')
+    # Получаем данные из переменных окружения
+    api_id = int(os.environ.get("API_ID"))
+    api_hash = os.environ.get("API_HASH")
+    session_name = os.environ.get("SESSION_NAME", "comment_session")
+    post_url = os.environ.get("POST_URL", "")
+    delay_min = int(os.environ.get("DELAY_MIN", 5))
+    delay_max = int(os.environ.get("DELAY_MAX", 10))
+    proxy_host = os.environ.get("PROXY_HOST")
+    proxy_port = int(os.environ.get("PROXY_PORT", 1080))
+    proxy_user = os.environ.get("PROXY_USER", None)
+    proxy_pass = os.environ.get("PROXY_PASS", None)
 
-def load_comments(file_path="comments.txt"):
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    except FileNotFoundError:
-        print("[ERROR] Файл comments.txt не найден.")
-        return []
+    # Прокси
+    proxy = None
+    if proxy_host:
+        proxy = ('socks5', proxy_host, proxy_port, True, proxy_user, proxy_pass)
 
-async def run_bot(api_id, api_hash, post_url, delay_range, comments):
-    print("[INFO] Авторизация...")
-    client = TelegramClient(SESSION_NAME, api_id, api_hash, proxy=PROXY)
+    client = TelegramClient(session_name, api_id, api_hash, proxy=proxy)
     await client.start()
+    print("[+] Авторизация прошла успешно")
 
+    # Получаем канал и ID поста
     try:
-        print("[INFO] Получаю канал и ID поста...")
         parts = post_url.strip().split("/")
         channel = parts[-2]
         message_id = int(parts[-1])
-
         msg = await client.get_messages(channel, ids=message_id)
 
         if not msg.replies or not msg.replies.comments:
-            print("[ERROR] У поста нет комментариев.")
+            print("[!] У поста отключены комментарии")
             return
 
         chat_id = msg.replies.replies.chat_id
-        print(f"[INFO] chat_id комментариев: {chat_id}")
-
-        used = set()
-        for comment in comments:
-            if comment in used:
-                continue
-            print(f"[SEND] {comment}")
-            await client.send_message(chat_id, comment)
-            used.add(comment)
-            await asyncio.sleep(random.randint(*delay_range))
-
-        print("[DONE] Все комментарии отправлены.")
-
     except Exception as e:
-        print(f"[ERROR] {e}")
-    finally:
-        await client.disconnect()
-
-def main():
-    print("=== Telegram Auto Commenter ===")
-
-    post_url = input("Вставь ссылку на пост: ").strip()
-    interval = input("Интервал (например 5-10): ").strip()
-
-    if '-' in interval:
-        parts = interval.split('-')
-        try:
-            delay_range = (int(parts[0]), int(parts[1]))
-        except:
-            print("[ERROR] Неверный формат интервала.")
-            return
-    else:
-        try:
-            delay = int(interval)
-            delay_range = (delay, delay)
-        except:
-            print("[ERROR] Неверный формат интервала.")
-            return
-
-    comments = load_comments()
-    if not comments:
-        print("[ERROR] Нет комментариев для отправки.")
+        print(f"[!] Ошибка при получении post_url: {e}")
         return
 
-    asyncio.run(run_bot(API_ID, API_HASH, post_url, delay_range, comments))
+    # Загружаем комментарии
+    try:
+        with open("comments.txt", "r", encoding="utf-8") as f:
+            comments = [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        print(f"[!] Не удалось открыть comments.txt: {e}")
+        return
+
+    used = set()
+    for comment in comments:
+        if comment in used:
+            continue
+        try:
+            await client.send_message(chat_id, comment)
+            print(f"[✔] Отправлено: {comment}")
+            used.add(comment)
+            await asyncio.sleep(random.randint(delay_min, delay_max))
+        except Exception as e:
+            print(f"[!] Ошибка при отправке: {e}")
+
+    print("✅ Все комментарии успешно отправлены.")
+    await client.disconnect()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
